@@ -30,7 +30,14 @@ export default function IntervalTimer({
   const [localCycles, setLocalCycles] = useState<number>(settings.cyclesCount);
 
   // Keep track of voice warnings given in the cycle to prevent duplicate triggering
-  const warningFlagRef = useRef<boolean>(false);
+  const lastTransitionStateRef = useRef<IntervalState | null>('AQUECIMENTO');
+  const warningFlagRef = useRef<string>(''); // 'cycle-state' to mark if 5s warning was given
+  const lastBeepTimeRef = useRef<string>(''); // 'cycle-state-seconds' to avoid double beep
+  
+  // Real system-time background tracking references
+  const startTimeRef = useRef<number | null>(null);
+  const elapsedBeforePauseRef = useRef<number>(0);
+  const [totalElapsedSeconds, setTotalElapsedSeconds] = useState<number>(0);
 
   // Sound Synth Generator (Web Audio API)
   const playBeep = (frequency: number, duration: number) => {
@@ -67,7 +74,15 @@ export default function IntervalTimer({
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'pt-BR';
-        utterance.rate = 1.1; // slightly sped up for responsiveness
+        
+        // Find best Portuguese voice
+        const voices = window.speechSynthesis.getVoices();
+        const ptVoice = voices.find(v => v.lang.toLowerCase().includes('pt'));
+        if (ptVoice) {
+          utterance.voice = ptVoice;
+        }
+
+        utterance.rate = 1.35; // Sped up voice rate per user request (1.35)
         window.speechSynthesis.speak(utterance);
       }
     } catch (e) {
@@ -75,13 +90,23 @@ export default function IntervalTimer({
     }
   };
 
+  // Human test sound command trigger
+  const handleTestVoice = () => {
+    speakVoice('Áudio ativado com sucesso! Irei comandar o seu ritmo neste treino falando quando você deve correr ou caminhar.');
+  };
+
   // Reset the interval clock to beginning
   const resetIntervals = () => {
     setIsActive(false);
+    startTimeRef.current = null;
+    elapsedBeforePauseRef.current = 0;
+    setTotalElapsedSeconds(0);
     setState('AQUECIMENTO');
     setCurrentCycle(1);
     setSecondsLeft(15);
-    warningFlagRef.current = false;
+    lastTransitionStateRef.current = 'AQUECIMENTO';
+    warningFlagRef.current = '';
+    lastBeepTimeRef.current = '';
   };
 
   // Form submit handler to commit settings changes
@@ -95,89 +120,131 @@ export default function IntervalTimer({
     resetIntervals();
   };
 
-  // Transition engine between state machines
-  const moveToNextState = () => {
-    warningFlagRef.current = false; // Reset warning lock
-    playBeep(1200, 0.6); // Loud transition double beep signal
-
-    if (state === 'AQUECIMENTO') {
-      setState('CORRIDA');
-      setSecondsLeft(localRun);
-      speakVoice('Corra!');
-    } else if (state === 'CORRIDA') {
-      setState('CAMINHADA');
-      setSecondsLeft(localWalk);
-      speakVoice('Caminhe e descanse.');
-    } else if (state === 'CAMINHADA') {
-      if (currentCycle < localCycles) {
-        setCurrentCycle((prev) => prev + 1);
-        setState('CORRIDA');
-        setSecondsLeft(localRun);
-        speakVoice('Corra de novo!');
-      } else {
-        setState('FIM');
-        setIsActive(false);
-        setSecondsLeft(0);
-        speakVoice('Parabéns, treino intervalado concluído com sucesso!');
-      }
-    }
-  };
-
-  // State transitions when secondsLeft reaches 0
+  // Timer loop execution using real clock timestamps (resilient to background tab suspension & sleeping)
   useEffect(() => {
-    if (isActive && secondsLeft === 0) {
-      moveToNextState();
-    }
-  }, [secondsLeft, isActive, state, currentCycle, localCycles, localWalk, localRun]);
-
-  // Timer loop execution
-  useEffect(() => {
-    let timer: any = null;
+    let intervalId: any = null;
 
     if (isActive) {
-      timer = setInterval(() => {
-        setSecondsLeft((prev) => {
-          if (prev <= 1) {
-            return 0;
-          }
+      if (startTimeRef.current === null) {
+        startTimeRef.current = Date.now();
+      }
 
-          const nextValue = prev - 1;
+      intervalId = setInterval(() => {
+        if (startTimeRef.current !== null) {
+          const activeMs = Date.now() - startTimeRef.current;
+          const activeSecs = activeMs / 1000;
+          const currentTotalSecs = elapsedBeforePauseRef.current + activeSecs;
+          
+          setTotalElapsedSeconds(currentTotalSecs);
 
-          // Crucial: Exact 5 second audio warning before state transitions!
-          if (nextValue === 5 && !warningFlagRef.current) {
-            warningFlagRef.current = true;
-            
-            // Audio beeps
-            playBeep(900, 0.35);
+          // Work out calculated states
+          let computedState: IntervalState = 'AQUECIMENTO';
+          let computedCycle = 1;
+          let computedSecondsLeft = 15;
 
-            // Predict and state vocalize what is coming next!
-            if (state === 'AQUECIMENTO') {
-              speakVoice('Atenção. Comece a correr em cinco segundos!');
-            } else if (state === 'CORRIDA') {
-              speakVoice('Prepare-se para caminhar em cinco segundos.');
-            } else if (state === 'CAMINHADA') {
-              if (currentCycle >= localCycles) {
-                speakVoice('Treino terminando em cinco segundos. Força total!');
+          const totalCycleDuration = localRun + localWalk;
+
+          if (currentTotalSecs < 15) {
+            computedState = 'AQUECIMENTO';
+            computedCycle = 1;
+            computedSecondsLeft = Math.max(0, Math.ceil(15 - currentTotalSecs));
+          } else {
+            const cycleElapsed = currentTotalSecs - 15;
+            const cycleIndex = Math.floor(cycleElapsed / totalCycleDuration);
+
+            if (cycleIndex >= localCycles) {
+              computedState = 'FIM';
+              computedCycle = localCycles;
+              computedSecondsLeft = 0;
+            } else {
+              computedCycle = cycleIndex + 1;
+              const timeInCycle = cycleElapsed % totalCycleDuration;
+              if (timeInCycle < localRun) {
+                computedState = 'CORRIDA';
+                computedSecondsLeft = Math.max(0, Math.ceil(localRun - timeInCycle));
               } else {
-                speakVoice('Finalizando descanso. Prepare para correr em cinco segundos!');
+                computedState = 'CAMINHADA';
+                computedSecondsLeft = Math.max(0, Math.ceil(totalCycleDuration - timeInCycle));
               }
             }
           }
 
-          // Small pulse heartbeat beeps for the last 3, 2, 1 seconds
-          if (nextValue <= 3 && nextValue >= 1) {
-            playBeep(650, 0.1);
-          }
+          // Sync with UI elements
+          setState(computedState);
+          setCurrentCycle(computedCycle);
+          setSecondsLeft(computedSecondsLeft);
 
-          return nextValue;
-        });
-      }, 1000);
+          if (computedState === 'FIM') {
+            setIsActive(false);
+            if (intervalId) clearInterval(intervalId);
+          }
+        }
+      }, 200); // Responsive 200ms tick prevents clock jumps or misses
+    } else {
+      if (startTimeRef.current !== null) {
+        const activeMs = Date.now() - startTimeRef.current;
+        elapsedBeforePauseRef.current += activeMs / 1000;
+        startTimeRef.current = null;
+      }
     }
 
     return () => {
-      if (timer) clearInterval(timer);
+      if (intervalId) clearInterval(intervalId);
     };
-  }, [isActive, state, currentCycle, localCycles, localWalk, localRun]);
+  }, [isActive, localCycles, localRun, localWalk]);
+
+  // Audio signals effect - reacts instantly to state/timer shifts safely
+  useEffect(() => {
+    if (!isActive) {
+      lastTransitionStateRef.current = state;
+      return;
+    }
+
+    // 1. Transition Speech trigger
+    if (state !== lastTransitionStateRef.current) {
+      const prevState = lastTransitionStateRef.current;
+      lastTransitionStateRef.current = state;
+
+      if (prevState !== null) {
+        playBeep(1200, 0.6); // Loud transition beep
+        
+        if (state === 'CORRIDA') {
+          speakVoice(currentCycle === 1 ? 'Corra!' : 'Corra de novo!');
+        } else if (state === 'CAMINHADA') {
+          speakVoice('Caminhe e descanse.');
+        } else if (state === 'FIM') {
+          setIsActive(false);
+          speakVoice('Parabéns, treino intervalado concluído com sucesso!');
+        }
+      }
+    }
+
+    // 2. Exact 5-second warning trigger
+    const warningKey = `${currentCycle}-${state}`;
+    if (secondsLeft === 5 && warningFlagRef.current !== warningKey) {
+      warningFlagRef.current = warningKey;
+      playBeep(900, 0.35);
+
+      if (state === 'AQUECIMENTO') {
+        speakVoice('Atenção. Comece a correr em cinco segundos!');
+      } else if (state === 'CORRIDA') {
+        speakVoice('Prepare-se para caminhar em cinco segundos.');
+      } else if (state === 'CAMINHADA') {
+        if (currentCycle >= localCycles) {
+          speakVoice('Treino terminando em cinco segundos. Força total!');
+        } else {
+          speakVoice('Finalizando descanso. Prepare para correr em cinco segundos!');
+        }
+      }
+    }
+
+    // 3. Last seconds countdown beeps (3, 2, 1)
+    const beepKey = `${currentCycle}-${state}-${secondsLeft}`;
+    if (secondsLeft <= 3 && secondsLeft >= 1 && lastBeepTimeRef.current !== beepKey) {
+      lastBeepTimeRef.current = beepKey;
+      playBeep(650, 0.1);
+    }
+  }, [isActive, state, secondsLeft, currentCycle, localCycles]);
 
   // Sync state upward to core tracker if callback provided
   useEffect(() => {
@@ -284,6 +351,33 @@ export default function IntervalTimer({
             >
               Aplicar Sequência Intervalada
             </button>
+
+            <div className="pt-3.5 border-t border-slate-800/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                  <Volume2 className="w-3.5 h-3.5 text-orange-500" />
+                  Assistente de Voz (Treinador)
+                </span>
+                <span className={`text-[9px] px-2 py-0.5 rounded-md font-bold uppercase ${
+                  audioEnabled ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-500'
+                }`}>
+                  {audioEnabled ? 'Ativo' : 'Inativo'}
+                </span>
+              </div>
+              
+              <button
+                id="btn-test-voice-synthesis"
+                type="button"
+                onClick={handleTestVoice}
+                className="w-full bg-[#0A0C10] hover:bg-[#12161e] text-slate-300 hover:text-white py-2 rounded-xl text-center text-[10px] font-mono uppercase tracking-wider border border-slate-800 hover:border-orange-500/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                🎙️ Testar Voz do Professor
+              </button>
+
+              <p className="text-[8.5px] text-slate-500 leading-relaxed font-sans pt-1">
+                💡 <strong>Aviso de Áudio:</strong> Se não ouvir o teste de voz do professor, verifique o volume do celular/computador e clique no botão de <strong>Abrir em Nova Aba</strong> no topo à direita para escutar com perfeição (os navegadores modernos por segurança bloqueiam áudio automático oculto dentro de janelas laterais de desenvolvimento).
+              </p>
+            </div>
           </form>
         </div>
       )}

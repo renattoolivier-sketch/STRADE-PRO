@@ -95,6 +95,10 @@ export default function App() {
   const watchIdRef = useRef<number | null>(null);
   const lastCoordinateRef = useRef<Coordinate | null>(null);
 
+  // Stopwatch background timing references
+  const stopwatchStartTimeRef = useRef<number | null>(null);
+  const stopwatchAccumulatedSecondsRef = useRef<number>(0);
+
   // Persistence triggers
   useEffect(() => {
     localStorage.setItem('strava_activities', JSON.stringify(activities));
@@ -201,28 +205,57 @@ export default function App() {
     };
   }, [isRecording, isPaused]);
 
-  // Live Stopwatch Ticker
+  // Live Stopwatch Ticker with robust system timestamp background calibration
   useEffect(() => {
     let ticker: any = null;
-    if (isRecording && !isPaused) {
-      ticker = setInterval(() => {
-        setTimeElapsed(prev => {
-          const nextTime = prev + 1;
-          
-          // Tick dynamic biometrics
-          setAvgBpmList(bList => [...bList, currentBpm]);
 
-          return nextTime;
-        });
-      }, 1000);
+    if (isRecording && !isPaused) {
+      if (stopwatchStartTimeRef.current === null) {
+        stopwatchStartTimeRef.current = Date.now();
+      }
+
+      let lastSecondPushed = Math.floor(stopwatchAccumulatedSecondsRef.current);
+
+      ticker = setInterval(() => {
+        if (stopwatchStartTimeRef.current !== null) {
+          const elapsedSecs = (Date.now() - stopwatchStartTimeRef.current) / 1000;
+          const currentTotal = stopwatchAccumulatedSecondsRef.current + elapsedSecs;
+          const currentTotalInt = Math.floor(currentTotal);
+          
+          setTimeElapsed(currentTotalInt);
+
+          // Log heartbeat lists corresponding to each fresh second elapsed
+          if (currentTotalInt > lastSecondPushed) {
+            const secondsPassed = currentTotalInt - lastSecondPushed;
+            setAvgBpmList(bList => {
+              const newList = [...bList];
+              for (let i = 0; i < secondsPassed; i++) {
+                newList.push(currentBpm);
+              }
+              return newList;
+            });
+            lastSecondPushed = currentTotalInt;
+          }
+        }
+      }, 250); // High sampling rate maintains UI updates during active tab returns
+    } else {
+      // Save current segment duration on stop or pause
+      if (stopwatchStartTimeRef.current !== null) {
+        stopwatchAccumulatedSecondsRef.current += (Date.now() - stopwatchStartTimeRef.current) / 1000;
+        stopwatchStartTimeRef.current = null;
+      }
     }
+
     return () => {
       if (ticker) clearInterval(ticker);
     };
-  }, [isRecording, isPaused, currentBpm, sportType]);
+  }, [isRecording, isPaused, currentBpm]);
 
   // Start Workout Tracking
   const handleStartWorkout = () => {
+    stopwatchStartTimeRef.current = Date.now();
+    stopwatchAccumulatedSecondsRef.current = 0;
+
     setTimeElapsed(0);
     setDistance(0);
     setAvgBpmList([]);
@@ -365,9 +398,10 @@ export default function App() {
         // Play congratulations voice cue
         if (window.speechSynthesis) {
           try {
-            window.speechSynthesis.speak(
-              new SpeechSynthesisUtterance(`Parabéns! Você alcançou a meta: ${ach.title}! ${ach.description}`)
-            );
+            const utterance = new SpeechSynthesisUtterance(`Parabéns! Você alcançou a meta: ${ach.title}! ${ach.description}`);
+            utterance.lang = 'pt-BR';
+            utterance.rate = 1.35; // Increased voice rate per user request (1.35)
+            window.speechSynthesis.speak(utterance);
           } catch(e){}
         }
 
