@@ -1,0 +1,6 @@
+{
+  "name": "Strava Sport Tracker",
+  "description": "Um aplicativo completo para monitoramento de corrida e ciclismo com suporte para cronometros de treino intervalado, integração com sensores cardíacos Bluetooth, controle de metas, cálculos calóricos personalizados e gráficos de desempenho semanal.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
