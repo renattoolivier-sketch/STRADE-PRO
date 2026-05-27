@@ -79,7 +79,8 @@ export default function IntervalTimer({
         osc.frequency.setValueAtTime(freq, now + index * 0.1);
         osc.type = 'sine';
         
-        gain.gain.setValueAtTime(0.15, now + index * 0.1);
+        // Boost gain to maximum (0.8) for loud audibility 
+        gain.gain.setValueAtTime(0.8, now + index * 0.1);
         gain.gain.exponentialRampToValueAtTime(0.001, now + index * 0.1 + 0.2);
         
         osc.start(now + index * 0.1);
@@ -108,7 +109,8 @@ export default function IntervalTimer({
         osc.frequency.setValueAtTime(freq, now + index * 0.12);
         osc.type = 'sine';
         
-        gain.gain.setValueAtTime(0.15, now + index * 0.12);
+        // Boost gain to maximum (0.8) for loud audibility
+        gain.gain.setValueAtTime(0.8, now + index * 0.12);
         gain.gain.exponentialRampToValueAtTime(0.001, now + index * 0.12 + 0.25);
         
         osc.start(now + index * 0.12);
@@ -136,7 +138,8 @@ export default function IntervalTimer({
         osc.frequency.setValueAtTime(987, now + delay); // B5 high alarm
         osc.type = 'sine';
         
-        gain.gain.setValueAtTime(0.15, now + delay);
+        // Boost gain to maximum (0.95) for urgent warnings
+        gain.gain.setValueAtTime(0.95, now + delay);
         gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.1);
         
         osc.start(now + delay);
@@ -163,7 +166,8 @@ export default function IntervalTimer({
       osc.frequency.setValueAtTime(587, now); // D5 athletic beep
       osc.type = 'sine';
       
-      gain.gain.setValueAtTime(0.12, now);
+      // Boost countdown beep to maximum clear level (0.85)
+      gain.gain.setValueAtTime(0.85, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
       
       osc.start(now);
@@ -191,7 +195,8 @@ export default function IntervalTimer({
         osc.frequency.setValueAtTime(freq, now + index * 0.15);
         osc.type = 'sine';
         
-        gain.gain.setValueAtTime(0.15, now + index * 0.15);
+        // Boost victory chorus block to maximum clear level (0.8)
+        gain.gain.setValueAtTime(0.8, now + index * 0.15);
         gain.gain.exponentialRampToValueAtTime(0.001, now + index * 0.15 + 0.45);
         
         osc.start(now + index * 0.15);
