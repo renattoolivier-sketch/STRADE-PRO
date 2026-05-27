@@ -72,6 +72,12 @@ export default function IntervalTimer({
       if ('speechSynthesis' in window) {
         // Cancel active cue to prevent overlap latency
         window.speechSynthesis.cancel();
+        
+        // Mobile WebView fix: force resume if engine is paused/suspended
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+        
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'pt-BR';
         

@@ -86,6 +86,7 @@ export default function App() {
   const [isSensorConnected, setIsSensorConnected] = useState<boolean>(false);
   
   // Route details & real Geolocation markers
+  const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [activeRoutePath, setActiveRoutePath] = useState<Coordinate[]>([]);
   const [selectedRouteTemplateId, setSelectedRouteTemplateId] = useState<string>('copacabana-beach');
   const [currentTemplateStep, setCurrentTemplateStep] = useState<number>(0);
@@ -98,6 +99,9 @@ export default function App() {
   // Stopwatch background timing references
   const stopwatchStartTimeRef = useRef<number | null>(null);
   const stopwatchAccumulatedSecondsRef = useRef<number>(0);
+
+  // Screen Wake Lock API reference to prevent screen turn-off on mobile
+  const wakeLockRef = useRef<any>(null);
 
   // Persistence triggers
   useEffect(() => {
@@ -124,6 +128,10 @@ export default function App() {
   // Live Geolocation Tracking Engine
   useEffect(() => {
     if (isRecording && !isPaused) {
+      if (isSimulating) {
+        setGpsStatus('CONECTADO');
+        return;
+      }
       if (navigator.geolocation) {
         setGpsStatus('BUSCANDO');
         
@@ -203,7 +211,56 @@ export default function App() {
         watchIdRef.current = null;
       }
     };
-  }, [isRecording, isPaused]);
+  }, [isRecording, isPaused, isSimulating]);
+
+  // Simulation tracking engine - Generates coordinates over time when testing indoors
+  useEffect(() => {
+    let simTicker: any = null;
+    if (isRecording && !isPaused && isSimulating) {
+      const template = ROUTE_TEMPLATES.find(r => r.id === selectedRouteTemplateId);
+      if (template && template.coordinates.length > 0) {
+        // Initialize start position if empty
+        if (activeRoutePath.length === 0) {
+          const firstCoord = template.coordinates[0];
+          setActiveRoutePath([firstCoord]);
+          lastCoordinateRef.current = firstCoord;
+        }
+
+        simTicker = setInterval(() => {
+          setActiveRoutePath((prev) => {
+            if (prev.length === 0) {
+              const firstCoord = template.coordinates[0];
+              lastCoordinateRef.current = firstCoord;
+              return [firstCoord];
+            }
+
+            const nextIndex = prev.length;
+            if (nextIndex >= template.coordinates.length) {
+              clearInterval(simTicker);
+              return prev;
+            }
+
+            const nextCoord = template.coordinates[nextIndex];
+            const prevCoord = lastCoordinateRef.current || prev[prev.length - 1];
+            const diffKm = calculateHaversineDistance(
+              prevCoord.lat,
+              prevCoord.lng,
+              nextCoord.lat,
+              nextCoord.lng
+            );
+
+            setDistance(prevDist => Number((prevDist + diffKm).toFixed(3)));
+            lastCoordinateRef.current = nextCoord;
+            return [...prev, nextCoord];
+          });
+        }, 3000); // Progress to the next coordinate point every 3 seconds
+      }
+    }
+
+    return () => {
+      if (simTicker) clearInterval(simTicker);
+    };
+  }, [isRecording, isPaused, isSimulating, selectedRouteTemplateId]);
 
   // Live Stopwatch Ticker with robust system timestamp background calibration
   useEffect(() => {
@@ -250,6 +307,40 @@ export default function App() {
       if (ticker) clearInterval(ticker);
     };
   }, [isRecording, isPaused, currentBpm]);
+
+  // Wake lock to keep celular screen active during recording
+  useEffect(() => {
+    const requestWakeLock = async () => {
+      if (typeof navigator !== 'undefined' && 'wakeLock' in navigator) {
+        try {
+          wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+          console.log('STRIDE PRO: Wake Lock ativado com sucesso.');
+        } catch (err) {
+          console.warn('Erro ao solicitar Wake Lock (Prevenção de Tela de Bloqueio):', err);
+        }
+      }
+    };
+
+    const releaseWakeLock = async () => {
+      if (wakeLockRef.current) {
+        try {
+          await wakeLockRef.current.release();
+          wakeLockRef.current = null;
+          console.log('STRIDE PRO: Wake Lock desativado.');
+        } catch (err) {}
+      }
+    };
+
+    if (isRecording && !isPaused) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+
+    return () => {
+      releaseWakeLock();
+    };
+  }, [isRecording, isPaused]);
 
   // Start Workout Tracking
   const handleStartWorkout = () => {
@@ -396,8 +487,12 @@ export default function App() {
       if (triggered) {
         setActiveAchievementUnlocked(ach.title + ' ' + ach.icon);
         // Play congratulations voice cue
-        if (window.speechSynthesis) {
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
           try {
+            window.speechSynthesis.cancel();
+            if (window.speechSynthesis.paused) {
+              window.speechSynthesis.resume();
+            }
             const utterance = new SpeechSynthesisUtterance(`Parabéns! Você alcançou a meta: ${ach.title}! ${ach.description}`);
             utterance.lang = 'pt-BR';
             utterance.rate = 1.35; // Increased voice rate per user request (1.35)
@@ -437,11 +532,9 @@ export default function App() {
   const aggregateCalories = activities.reduce((sum, current) => sum + current.calories, 0);
 
   // Render simulator content based on active tab
-  const renderTabContent = () => {
-    switch (tab) {
-      case 'RECORD':
-        return (
-          <div className="space-y-5">
+  const renderRecordTab = () => {
+    return (
+      <div className="space-y-5">
             {/* Sport toggle slider */}
             {!isRecording ? (
               <div className="space-y-3">
@@ -475,16 +568,74 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Real smartphone GPS signal checker state */}
-                <div className="bg-[#161B22] border border-slate-800 p-3 rounded-2xl flex items-center justify-between">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5 font-sans">
-                    <MapPin className="w-4 h-4 text-orange-500" />
-                    GPS do Dispositivo
-                  </span>
-                  <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    PRONTO
-                  </span>
+                {/* Geolocation Input Mode Toggles */}
+                <div className="bg-[#161B22] border border-slate-800 p-4 rounded-2xl space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-300 font-bold uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                      <MapPin className="w-4 h-4 text-orange-500" />
+                      Captura de Trajeto
+                    </span>
+                    <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono font-bold">
+                      {isSimulating ? 'SIMULADO' : 'GPS ATIVO'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 bg-[#0A0C10] p-1 rounded-xl border border-slate-850">
+                    <button
+                      id="opt-gps-real"
+                      type="button"
+                      onClick={() => setIsSimulating(false)}
+                      className={`py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                        !isSimulating 
+                          ? 'bg-orange-600 text-white shadow-lg' 
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      📡 GPS Real 
+                    </button>
+                    <button
+                      id="opt-gps-sim"
+                      type="button"
+                      onClick={() => {
+                        setIsSimulating(true);
+                        // Default to sport-appropriate route templates
+                        if (sportType === 'CORRIDA') {
+                          setSelectedRouteTemplateId('copacabana-beach');
+                        } else {
+                          setSelectedRouteTemplateId('lagoa-rodrigo-freitas');
+                        }
+                      }}
+                      className={`py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                        isSimulating 
+                          ? 'bg-orange-600 text-white shadow-lg' 
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      🧪 Simular (Testar em Casa)
+                    </button>
+                  </div>
+
+                  {/* Template selector if simulating */}
+                  {isSimulating && (
+                    <div className="space-y-1.5 pt-1">
+                      <label className="block text-[9px] text-slate-400 font-bold uppercase">Escolher Trajeto para Simulação:</label>
+                      <select
+                        id="select-simulation-route"
+                        value={selectedRouteTemplateId}
+                        onChange={(e) => setSelectedRouteTemplateId(e.target.value)}
+                        className="w-full bg-[#0A0C10] border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 font-sans focus:outline-none focus:border-orange-500 cursor-pointer"
+                      >
+                        {ROUTE_TEMPLATES.filter(r => r.type === sportType).map((route) => (
+                          <option key={route.id} value={route.id}>
+                            {route.name} ({route.distance}km)
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[9px] text-slate-500 leading-normal">
+                        Modo Simulador: Conforme o cronômetro avança, o aplicativo gerará novos pontos ao longo da orla desejada para desenhar o trajeto live!
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Workout category selection */}
@@ -629,10 +780,11 @@ export default function App() {
               </div>
             )}
           </div>
-        );
+    );
+  };
 
-      case 'HISTORY':
-        return (
+  const renderHistoryTab = () => {
+    return (
           <div className="space-y-6">
             {/* Aggregate lifetime analytics cards */}
             <div className="grid grid-cols-3 gap-2">
@@ -748,30 +900,6 @@ export default function App() {
             </div>
           </div>
         );
-
-      case 'BLUETOOTH':
-        return (
-          <BluetoothHR
-            currentBpm={currentBpm}
-            onBpmChange={setCurrentBpm}
-            isSensorConnected={isSensorConnected}
-            setIsSensorConnected={setIsSensorConnected}
-            userAge={profile.age}
-          />
-        );
-
-      case 'PROFILE':
-        return (
-          <ProfileSettings
-            profile={profile}
-            onSaveProfile={setProfile}
-            achievements={achievements}
-          />
-        );
-      
-      default:
-        return null;
-    }
   };
 
   return (
@@ -819,7 +947,28 @@ export default function App() {
 
         {/* Tab content viewer */}
         <main className="flex-1 overflow-y-auto p-4 space-y-4">
-          {renderTabContent()}
+          <div className={tab === 'RECORD' ? 'block' : 'hidden'}>
+            {renderRecordTab()}
+          </div>
+          <div className={tab === 'HISTORY' ? 'block animate-fade-in' : 'hidden'}>
+            {renderHistoryTab()}
+          </div>
+          <div className={tab === 'BLUETOOTH' ? 'block animate-fade-in' : 'hidden'}>
+            <BluetoothHR
+              currentBpm={currentBpm}
+              onBpmChange={setCurrentBpm}
+              isSensorConnected={isSensorConnected}
+              setIsSensorConnected={setIsSensorConnected}
+              userAge={profile.age}
+            />
+          </div>
+          <div className={tab === 'PROFILE' ? 'block animate-fade-in' : 'hidden'}>
+            <ProfileSettings
+              profile={profile}
+              onSaveProfile={setProfile}
+              achievements={achievements}
+            />
+          </div>
         </main>
 
         {/* Premium Bottom navigation bar tab bar controllers */}
