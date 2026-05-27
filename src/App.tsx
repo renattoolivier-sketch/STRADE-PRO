@@ -812,11 +812,8 @@ export default function App() {
 
         {/* Active app header branding panel */}
         <header className="p-4 bg-[#161B22]/90 border-b border-slate-800/80 backdrop-blur shrink-0 flex justify-between items-center sticky top-0 z-20">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-orange-600 rounded-lg flex items-center justify-center font-bold text-sm text-white shadow-lg shadow-orange-950/40">S</div>
-            <div>
-              <h1 className="text-sm font-black tracking-tight text-white">STRIDE PRO <span className="text-orange-500">•</span></h1>
-            </div>
+          <div className="flex items-center">
+            <h1 className="text-sm font-black tracking-tight text-white">STRIDE PRO</h1>
           </div>
         </header>
 

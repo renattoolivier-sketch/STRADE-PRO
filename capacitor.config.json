@@ -1,0 +1,6 @@
+{
+  "appId": "com.stridepro.app",
+  "appName": "STRIDE PRO",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

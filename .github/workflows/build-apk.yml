@@ -1,0 +1,52 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java Development Kit (JDK 17)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Node Dependencies
+        run: npm install
+
+      - name: Build Web Application
+        run: npm run build
+
+      - name: Initialize and Add Android Platform
+        run: |
+          npx cap add android || echo "Android platform already added or initialized"
+          npx cap sync android
+
+      - name: Grant Execute Permission to Gradle
+        run: chmod +x android/gradlew
+
+      - name: Compile APK (assembleDebug)
+        run: |
+          cd android
+          ./gradlew assembleDebug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: STRIDE-PRO-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
