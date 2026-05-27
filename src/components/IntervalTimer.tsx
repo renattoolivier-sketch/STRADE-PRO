@@ -39,56 +39,192 @@ export default function IntervalTimer({
   const elapsedBeforePauseRef = useRef<number>(0);
   const [totalElapsedSeconds, setTotalElapsedSeconds] = useState<number>(0);
 
-  // Sound Synth Generator (Web Audio API)
-  const playBeep = (frequency: number, duration: number) => {
-    if (!audioEnabled) return;
+  const audioCtxRef = useRef<any>(null);
+
+  // Lazy initialize/resume single AudioContext to bypass mobile WebView allocation limits
+  const getAudioContext = () => {
+    if (typeof window === 'undefined') return null;
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.frequency.value = frequency;
-      osc.type = 'sine';
-
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-
-      osc.start();
-      osc.stop(ctx.currentTime + duration);
+      if (!audioCtxRef.current) {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          audioCtxRef.current = new AudioCtx();
+        }
+      }
+      if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume();
+      }
+      return audioCtxRef.current;
     } catch (e) {
-      console.warn('Audio Context failed to boot:', e);
+      console.warn('STRIDE PRO: Failed to initialize/resume AudioContext:', e);
+      return null;
     }
   };
 
-  // Speak voice alarm helper
+  // Chronometer Chimes: 1. Energizing ascending tri-tone to start running (C5, E5, G5)
+  const playChimeStart = () => {
+    if (!audioEnabled) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      
+      const notes = [523, 659, 784]; // C5, E5, G5
+      notes.forEach((freq, index) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.frequency.setValueAtTime(freq, now + index * 0.1);
+        osc.type = 'sine';
+        
+        gain.gain.setValueAtTime(0.15, now + index * 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + index * 0.1 + 0.2);
+        
+        osc.start(now + index * 0.1);
+        osc.stop(now + index * 0.1 + 0.2);
+      });
+    } catch (e) {
+      console.warn('Start Chime failed:', e);
+    }
+  };
+
+  // Chronometer Chimes: 2. Smooth descending bi-tone to rest/walk (E5, A4)
+  const playChimeRest = () => {
+    if (!audioEnabled) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      
+      const notes = [659, 440]; // E5, A4
+      notes.forEach((freq, index) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.frequency.setValueAtTime(freq, now + index * 0.12);
+        osc.type = 'sine';
+        
+        gain.gain.setValueAtTime(0.15, now + index * 0.12);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + index * 0.12 + 0.25);
+        
+        osc.start(now + index * 0.12);
+        osc.stop(now + index * 0.12 + 0.25);
+      });
+    } catch (e) {
+      console.warn('Rest Chime failed:', e);
+    }
+  };
+
+  // Chronometer Chimes: 3. Double alert beep for the 5-second warning (B5, B5)
+  const playChimeWarning = () => {
+    if (!audioEnabled) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+
+      [0, 0.12].forEach((delay) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.frequency.setValueAtTime(987, now + delay); // B5 high alarm
+        osc.type = 'sine';
+        
+        gain.gain.setValueAtTime(0.15, now + delay);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.1);
+        
+        osc.start(now + delay);
+        osc.stop(now + delay + 0.1);
+      });
+    } catch (e) {
+      console.warn('Warning Chime failed:', e);
+    }
+  };
+
+  // Chronometer Chimes: 4. Crisp countdown ticks (3s, 2s, 1s) (D5)
+  const playChimeCountdown = () => {
+    if (!audioEnabled) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.frequency.setValueAtTime(587, now); // D5 athletic beep
+      osc.type = 'sine';
+      
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+      
+      osc.start(now);
+      osc.stop(now + 0.08);
+    } catch (e) {
+      console.warn('Countdown Tick failed:', e);
+    }
+  };
+
+  // Chronometer Chimes: 5. Beautiful cascading melody for training complete (C5, E5, G5, C6)
+  const playChimeVictory = () => {
+    if (!audioEnabled) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+
+      const notes = [523, 659, 784, 1046]; // C5, E5, G5, C6
+      notes.forEach((freq, index) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.frequency.setValueAtTime(freq, now + index * 0.15);
+        osc.type = 'sine';
+        
+        gain.gain.setValueAtTime(0.15, now + index * 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + index * 0.15 + 0.45);
+        
+        osc.start(now + index * 0.15);
+        osc.stop(now + index * 0.15 + 0.45);
+      });
+    } catch (e) {
+      console.warn('Victory Chime failed:', e);
+    }
+  };
+
+  // Speak voice alarm helper with advanced mobile redundancies
   const speakVoice = (text: string) => {
     if (!audioEnabled) return;
     try {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        // Mobile WebView fix: force resume if engine is paused/suspended
+        // Mobile WebView fix: force resume if engine is suspended or paused
         if (window.speechSynthesis.paused) {
           window.speechSynthesis.resume();
         }
 
-        // Cancel active cue to prevent overlap latency
+        // Intercept/Cancel running speech
         window.speechSynthesis.cancel();
         
-        // Android WebView fix: adding a tiny 50ms delay between cancel and speak
-        // prevents the speech queue from freezing or getting discarded.
+        // Android WebView fix: Adding a tiny 60ms delay prevents speech engine discard bugs
         setTimeout(() => {
           try {
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'pt-BR';
             utterance.pitch = 1.0;
             utterance.volume = 1.0;
-            utterance.rate = 1.35; // Sped up voice rate per user request (1.35)
+            utterance.rate = 1.35; // Custom high speech velocity for rapid sport updates
             
-            // Find best Portuguese voice
+            // Query device voices and try to match Portuguese
             const voices = window.speechSynthesis.getVoices();
             const ptVoice = voices.find(v => v.lang.toLowerCase() === 'pt-br') || 
                             voices.find(v => v.lang.toLowerCase().includes('pt'));
@@ -98,33 +234,40 @@ export default function IntervalTimer({
 
             window.speechSynthesis.speak(utterance);
           } catch (speakError) {
-            console.warn('SpeechSynthesis speak failed inside timeout:', speakError);
+            console.warn('SpeechSynthesis speak failed inside delay:', speakError);
           }
-        }, 50);
+        }, 60);
       }
     } catch (e) {
-      console.warn('Speech synthesis unsupported or failed:', e);
+      console.warn('Speech synthesis failed:', e);
     }
   };
 
-  // Warm-up and unlock SpeechSynthesis using a valid user-gesture (mobile security requirement)
+  // Warm-up and unlock SpeechSynthesis & AudioContext on a registered click (WebView prerequisite)
   const unlockSpeechSynthesis = () => {
+    try {
+      getAudioContext(); // Resume Web Audio API context
+    } catch (e) {}
+
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         const silentUtterance = new SpeechSynthesisUtterance(' ');
         silentUtterance.volume = 0;
         window.speechSynthesis.speak(silentUtterance);
-        console.log('STRIDE PRO: Speech Synthesis unlocked under user gesture.');
+        console.log('STRIDE PRO: Audio & Speech engines initialized via gesture.');
       } catch (err) {
-        console.warn('Silent SpeechSynthesis warm-up error:', err);
+        console.warn('Speech synthesis warmup warn:', err);
       }
     }
   };
 
-  // Human test sound command trigger
+  // Human test sound command trigger to assess synthesizers
   const handleTestVoice = () => {
     unlockSpeechSynthesis();
-    speakVoice('Áudio ativado com sucesso! Irei comandar o seu ritmo neste treino falando quando você deve correr ou caminhar.');
+    playChimeStart(); // Immediately play physical chime to verify speakers
+    setTimeout(() => {
+      speakVoice('Áudio ativado com sucesso! Irei comandar o seu ritmo neste treino falando quando você deve correr ou caminhar.');
+    }, 200);
   };
 
   // Reset the interval clock to beginning
@@ -238,14 +381,15 @@ export default function IntervalTimer({
       lastTransitionStateRef.current = state;
 
       if (prevState !== null) {
-        playBeep(1200, 0.6); // Loud transition beep
-        
         if (state === 'CORRIDA') {
+          playChimeStart(); // Rich running start chime
           speakVoice(currentCycle === 1 ? 'Corra!' : 'Corra de novo!');
         } else if (state === 'CAMINHADA') {
+          playChimeRest(); // Soothing rest chime
           speakVoice('Caminhe e descanse.');
         } else if (state === 'FIM') {
           setIsActive(false);
+          playChimeVictory(); // Triumphant victory sequence!
           speakVoice('Parabéns, treino intervalado concluído com sucesso!');
         }
       }
@@ -255,7 +399,7 @@ export default function IntervalTimer({
     const warningKey = `${currentCycle}-${state}`;
     if (secondsLeft === 5 && warningFlagRef.current !== warningKey) {
       warningFlagRef.current = warningKey;
-      playBeep(900, 0.35);
+      playChimeWarning(); // Pre-warning attention chime
 
       if (state === 'AQUECIMENTO') {
         speakVoice('Atenção. Comece a correr em cinco segundos!');
@@ -274,7 +418,7 @@ export default function IntervalTimer({
     const beepKey = `${currentCycle}-${state}-${secondsLeft}`;
     if (secondsLeft <= 3 && secondsLeft >= 1 && lastBeepTimeRef.current !== beepKey) {
       lastBeepTimeRef.current = beepKey;
-      playBeep(650, 0.1);
+      playChimeCountdown(); // Athletic countdown click
     }
   }, [isActive, state, secondsLeft, currentCycle, localCycles]);
 
@@ -407,7 +551,7 @@ export default function IntervalTimer({
               </button>
 
               <p className="text-[8.5px] text-slate-500 leading-relaxed font-sans pt-1">
-                💡 <strong>Aviso de Áudio:</strong> Se não ouvir o teste de voz do professor, verifique o volume do celular/computador e clique no botão de <strong>Abrir em Nova Aba</strong> no topo à direita para escutar com perfeição (os navegadores modernos por segurança bloqueiam áudio automático oculto dentro de janelas laterais de desenvolvimento).
+                💡 <strong>Aviso de Áudio:</strong> Ativamos um <strong>Sintetizador Atlético Integrado (Sons Beeps/Chimes no estilo relógio Garmin/Casio)</strong> para contornar limitações do Android WebView! Se o seu celular não tocar a voz falada (por falta do pacote de voz em Português no Google TTS ou restrição de WebView em apps Android), você ainda ouvirá as melodias esportivas profissionais avisando cada mudança de ritmo e os segundos finais. Verifique o volume geral e se ativou a chavinha de som!
               </p>
             </div>
           </form>
