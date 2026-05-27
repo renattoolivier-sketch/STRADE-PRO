@@ -489,14 +489,27 @@ export default function App() {
         // Play congratulations voice cue
         if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
           try {
-            window.speechSynthesis.cancel();
             if (window.speechSynthesis.paused) {
               window.speechSynthesis.resume();
             }
-            const utterance = new SpeechSynthesisUtterance(`Parabéns! Você alcançou a meta: ${ach.title}! ${ach.description}`);
-            utterance.lang = 'pt-BR';
-            utterance.rate = 1.35; // Increased voice rate per user request (1.35)
-            window.speechSynthesis.speak(utterance);
+            window.speechSynthesis.cancel();
+            
+            setTimeout(() => {
+              try {
+                const utterance = new SpeechSynthesisUtterance(`Parabéns! Você alcançou a meta: ${ach.title}! ${ach.description}`);
+                utterance.lang = 'pt-BR';
+                utterance.rate = 1.35; // Increased voice rate per user request (1.35)
+                
+                const voices = window.speechSynthesis.getVoices();
+                const ptVoice = voices.find(v => v.lang.toLowerCase() === 'pt-br') || 
+                                voices.find(v => v.lang.toLowerCase().includes('pt'));
+                if (ptVoice) {
+                  utterance.voice = ptVoice;
+                }
+                
+                window.speechSynthesis.speak(utterance);
+              } catch (err) {}
+            }, 50);
           } catch(e){}
         }
 

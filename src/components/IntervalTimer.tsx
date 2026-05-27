@@ -69,35 +69,61 @@ export default function IntervalTimer({
   const speakVoice = (text: string) => {
     if (!audioEnabled) return;
     try {
-      if ('speechSynthesis' in window) {
-        // Cancel active cue to prevent overlap latency
-        window.speechSynthesis.cancel();
-        
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         // Mobile WebView fix: force resume if engine is paused/suspended
         if (window.speechSynthesis.paused) {
           window.speechSynthesis.resume();
         }
-        
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'pt-BR';
-        
-        // Find best Portuguese voice
-        const voices = window.speechSynthesis.getVoices();
-        const ptVoice = voices.find(v => v.lang.toLowerCase().includes('pt'));
-        if (ptVoice) {
-          utterance.voice = ptVoice;
-        }
 
-        utterance.rate = 1.35; // Sped up voice rate per user request (1.35)
-        window.speechSynthesis.speak(utterance);
+        // Cancel active cue to prevent overlap latency
+        window.speechSynthesis.cancel();
+        
+        // Android WebView fix: adding a tiny 50ms delay between cancel and speak
+        // prevents the speech queue from freezing or getting discarded.
+        setTimeout(() => {
+          try {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'pt-BR';
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+            utterance.rate = 1.35; // Sped up voice rate per user request (1.35)
+            
+            // Find best Portuguese voice
+            const voices = window.speechSynthesis.getVoices();
+            const ptVoice = voices.find(v => v.lang.toLowerCase() === 'pt-br') || 
+                            voices.find(v => v.lang.toLowerCase().includes('pt'));
+            if (ptVoice) {
+              utterance.voice = ptVoice;
+            }
+
+            window.speechSynthesis.speak(utterance);
+          } catch (speakError) {
+            console.warn('SpeechSynthesis speak failed inside timeout:', speakError);
+          }
+        }, 50);
       }
     } catch (e) {
       console.warn('Speech synthesis unsupported or failed:', e);
     }
   };
 
+  // Warm-up and unlock SpeechSynthesis using a valid user-gesture (mobile security requirement)
+  const unlockSpeechSynthesis = () => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        const silentUtterance = new SpeechSynthesisUtterance(' ');
+        silentUtterance.volume = 0;
+        window.speechSynthesis.speak(silentUtterance);
+        console.log('STRIDE PRO: Speech Synthesis unlocked under user gesture.');
+      } catch (err) {
+        console.warn('Silent SpeechSynthesis warm-up error:', err);
+      }
+    }
+  };
+
   // Human test sound command trigger
   const handleTestVoice = () => {
+    unlockSpeechSynthesis();
     speakVoice('Áudio ativado com sucesso! Irei comandar o seu ritmo neste treino falando quando você deve correr ou caminhar.');
   };
 
@@ -438,6 +464,7 @@ export default function IntervalTimer({
           <button
             id="btn-play-pause-intervals"
             onClick={() => {
+              unlockSpeechSynthesis();
               if (state === 'FIM') {
                 resetIntervals();
                 return;
@@ -459,7 +486,10 @@ export default function IntervalTimer({
 
           <button
             id="btn-toggle-sound-direct"
-            onClick={() => setAudioEnabled(!audioEnabled)}
+            onClick={() => {
+              unlockSpeechSynthesis();
+              setAudioEnabled(!audioEnabled);
+            }}
             className={`p-3 rounded-full transition-colors cursor-pointer border ${
               audioEnabled ? 'bg-slate-800 hover:bg-slate-700 text-orange-400 border-slate-700' : 'bg-[#0A0C10] text-[#161B22] border-slate-800'
             }`}
